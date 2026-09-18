@@ -1,0 +1,17 @@
+name: tailgate
+version: 0.1.0
+description: Follow the jobs Hermes hands off (coding agents, CI, long scripts). Progress updates and a finish notice in chat, per-job mute and follow, no model calls.
+author: Emir Ibrahimbegovic
+manifest_version: 2
+api_version: 1
+license: MIT
+homepage: https://github.com/c0mrade/tailgate
+tags: [jobs, notifications, delegation, gateway, telegram]
+provides_tools:
+  - tailgate_job_id
+provides_hooks: []
+config_schema:
+  sources:
+    type: list
+    default: []
+    description: 'Job sources: [{name: <id>, command: [argv, ...]}]. Each command prints one JSON object per job per line. See README.'
