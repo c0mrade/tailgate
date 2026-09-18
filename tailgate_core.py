@@ -133,6 +133,7 @@ def collect(sources: Iterable[dict]) -> tuple[list[Job], list[str]]:
 
 def empty_state() -> dict:
     # jobs: id -> {"source", "state", "muted", "announced", "reserved", "first_seen", "last_seen"}
+    # baselined: the first round has run (see merge); counters: last number handed out per topic
     return {"version": 1, "jobs": {}}
 
 
@@ -210,15 +211,19 @@ def duration(seconds: int | None) -> str:
 
 
 def merge(state: dict, jobs: list[Job], now: float) -> None:
-    """Record what the sources reported. A job first seen already finished is marked announced
-    (it ended before tailgate knew about it) unless it was reserved through the tool."""
+    """Record what the sources reported. The first round ever is the baseline: jobs already
+    finished then ended before tailgate existed and are not announced. After that, every job
+    tailgate has not seen before is new and gets its finish line, even if it is already finished
+    when first seen (a short job between two rounds). No tool call needed for that."""
     known = state["jobs"]
+    baseline = not state.get("baselined")
     for job in jobs:
         entry = known.get(job.id)
         if entry is None:
             entry = known[job.id] = {"muted": False, "reserved": False, "first_seen": now,
-                                     "announced": job.state in FINISHED}
+                                     "announced": baseline and job.state in FINISHED}
         entry.update(source=job.source, state=job.state, last_seen=now)
+    state["baselined"] = True
     for job_id in [k for k, v in known.items()
                    if now - v.get("last_seen", v.get("first_seen", now)) > FORGET_AFTER_S]:
         del known[job_id]
@@ -241,21 +246,25 @@ def reserve_id(state: dict, topic: str, taken: Iterable[str], now: float) -> str
 
 
 def progress_line(job: Job) -> str:
-    parts = [f"{ICONS[job.state]} {job.id}", f"{job.state} {duration(job.elapsed_s)}".strip()]
-    if job.progress:
-        parts.append(job.progress)
-    if job.last:
-        parts.append(f"last: {job.last}")
+    parts = [f"{ICONS[job.state]} id: {job.id}", f"{job.state} {duration(job.elapsed_s)}".strip()]
+    if job.state != "queued":  # nothing has happened yet: no "0 events", no last step
+        if job.progress:
+            parts.append(job.progress)
+        if job.last:
+            parts.append(f"last: {job.last}")
     return " · ".join(parts)
 
 
 def finish_line(job: Job) -> str:
     took = f" after {duration(job.elapsed_s)}" if job.elapsed_s is not None else ""
+    what = {"done": f"done{took}", "incomplete": f"stopped without finishing{took}",
+            "failed": f"failed{took}"}[job.state]
+    parts = [f"{ICONS[job.state]} id: {job.id}", what]
+    if job.progress:
+        parts.append(job.progress)
     if job.state == "done":
-        return f"✅ {job.id} · done{took} · ask Hermes about {job.id}"
-    if job.state == "incomplete":
-        return f"⚠️ {job.id} · stopped without finishing{took}"
-    return f"❌ {job.id} · failed{took}"
+        parts.append(f"ask Hermes about {job.id}")
+    return " · ".join(parts)
 
 
 def advance(state: dict, jobs: list[Job], now: float) -> list[str]:
@@ -272,6 +281,15 @@ def advance(state: dict, jobs: list[Job], now: float) -> list[str]:
         elif not entry.get("muted"):
             lines.append(progress_line(job))
     return lines
+
+
+def take_baseline(store: Store, sources: list[dict], now: float | None = None) -> int:
+    """Record the jobs that exist right now as history, so they are never announced. Run by
+    `hermes tailgate setup`; returns how many jobs were already known or recorded."""
+    jobs, _ = collect(sources)
+    with store.edit() as state:
+        merge(state, jobs, time.time() if now is None else now)
+        return len(state["jobs"])
 
 
 def tick(store: Store, sources: list[dict], now: float | None = None, commit: bool = True) -> str:
@@ -295,7 +313,7 @@ def list_jobs(state: dict, jobs: list[Job]) -> str:
         return "No jobs."
     lines = []
     for job in sorted(jobs, key=lambda j: (j.state not in ACTIVE, j.id)):
-        line = f"{ICONS[job.state]} {job.id} · {job.state} {duration(job.elapsed_s)}".rstrip()
+        line = f"{ICONS[job.state]} id: {job.id} · {job.state} {duration(job.elapsed_s)}".rstrip()
         if job.state in ACTIVE:
             muted = state["jobs"].get(job.id, {}).get("muted")
             line += " · 🔕 muted" if muted else " · 🔔 following"

@@ -51,16 +51,24 @@ def test_failing_and_missing_sources_become_problems(tmp_path):
 def test_tick_progress_then_single_finish_line(tmp_path, source):
     store = core.Store(tmp_path)
     out = core.tick(store, [source(RUNNING)], now=1000)
-    assert out == "⏳ intraday-1 · running 1h 05m · 83 events · last: bundle exec rspec\n" + core.HINT
+    assert out == "⏳ id: intraday-1 · running 1h 05m · 83 events · last: bundle exec rspec\n" + core.HINT
     done = dict(RUNNING, state="done", elapsed_s=7200)
-    assert core.tick(store, [source(done)], now=1300) == "✅ intraday-1 · done after 2h 00m · ask Hermes about intraday-1"
+    assert core.tick(store, [source(done)], now=1300) == "✅ id: intraday-1 · done after 2h 00m · 83 events · ask Hermes about intraday-1"
     assert core.tick(store, [source(done)], now=1600) == ""  # announced once
 
 
-def test_jobs_already_finished_when_first_seen_are_not_announced(tmp_path, source):
+def test_first_round_is_the_baseline(tmp_path, source):
     store = core.Store(tmp_path)
     old = {"id": "old-1", "state": "done", "elapsed_s": 60}
-    assert core.tick(store, [source(old)], now=1000) == ""
+    assert core.tick(store, [source(old)], now=1000) == ""  # finished before tailgate existed
+
+
+def test_short_job_after_the_baseline_is_announced_without_the_tool(tmp_path, source):
+    store = core.Store(tmp_path)
+    old = {"id": "old-1", "state": "done", "elapsed_s": 60}
+    core.take_baseline(store, [source(old)], now=1000)
+    quick = {"id": "quick-1", "state": "done", "elapsed_s": 90}  # started and ended between rounds
+    assert core.tick(store, [source(old, quick)], now=1300) == "✅ id: quick-1 · done after 1m · ask Hermes about quick-1"
 
 
 def test_reserved_job_is_announced_even_if_first_seen_finished(tmp_path, source):
@@ -68,7 +76,7 @@ def test_reserved_job_is_announced_even_if_first_seen_finished(tmp_path, source)
     with store.edit() as state:
         job_id = core.reserve_id(state, "quick", [], now=1000)
     finished = {"id": job_id, "state": "incomplete", "elapsed_s": 120}
-    assert core.tick(store, [source(finished)], now=1100) == f"⚠️ {job_id} · stopped without finishing after 2m"
+    assert core.tick(store, [source(finished)], now=1100) == f"⚠️ id: {job_id} · stopped without finishing after 2m"
 
 
 def test_mute_silences_progress_but_not_the_finish_line(tmp_path, source):
@@ -78,7 +86,7 @@ def test_mute_silences_progress_but_not_the_finish_line(tmp_path, source):
     with store.edit() as state:
         assert "muted" in core.set_muted(state, jobs, "intraday-1", True)
     assert core.tick(store, [src], now=1000) == ""
-    assert core.tick(store, [source(dict(RUNNING, state="failed"))], now=1300).startswith("❌ intraday-1 · failed")
+    assert core.tick(store, [source(dict(RUNNING, state="failed"))], now=1300).startswith("❌ id: intraday-1 · failed")
 
 
 def test_set_muted_refusals(tmp_path, source):
@@ -142,3 +150,8 @@ def test_settings_snapshot_round_trip(tmp_path):
     core.save_settings(tmp_path, [{"name": "a", "command": ["echo"]}])
     assert core.load_settings(tmp_path) == [{"name": "a", "command": ["echo"]}]
     assert core.load_settings(tmp_path / "missing") == []
+
+
+def test_queued_lines_hide_progress_and_last():
+    job = core.Job("new-1", "queued", "src", 30, "0 events", "nothing yet")
+    assert core.progress_line(job) == "⏳ id: new-1 · queued 0m"

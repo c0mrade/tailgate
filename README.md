@@ -5,16 +5,16 @@ other tools (coding agents, CI, long scripts) from whatever chat you use, **with
 turns on it**.
 
 ```
-⏳ intraday-1 · running 1h 05m · 83 events · last: bundle exec rspec
-⏳ nightly-build-3 · running 12m · step 4/9
-✅ rubocop-fix-2 · done after 1h 11m · ask Hermes about rubocop-fix-2
+⏳ id: intraday-1 · running 1h 05m · 83 events · last: bundle exec rspec
+⏳ id: nightly-build-3 · running 12m · step 4/9
+✅ id: rubocop-fix-2 · done after 1h 11m · 108 events · ask Hermes about rubocop-fix-2
 ```
 
 - A progress line for every job you follow, every few minutes, and one line when it finishes.
 - `/tailgate mute <id>` silences one job; you still hear when it finishes. `/tailgate follow <id>`
   brings it back. New jobs are followed by default.
-- Every job has a unique id. The agent asks tailgate for one before it hands a job off, so ids
-  never collide and never get reused.
+- Every job gets its finish line, even a short one that starts and ends between two rounds.
+- Tidy, never-reused job ids: the agent can ask tailgate for one before it hands a job off.
 - None of this calls the model. Progress runs as a Hermes no-agent cron job, and the slash commands
   answer directly. On a local model that matters: an agent that wakes up every five minutes to
   check on a job slows down the very job it is watching.
@@ -34,15 +34,26 @@ hermes plugins install https://github.com/c0mrade/tailgate    # or copy this dir
 hermes plugins enable --no-allow-tool-override tailgate
 ```
 
-Tell tailgate where your jobs are (see *Job sources*), restart the gateway, then schedule the
+Tell tailgate where your jobs are (see *Job sources*), restart Hermes (`hermes-gateway` and, if
+you use web chats, `hermes-dashboard`: each loads plugins once at start), then schedule the
 progress round:
 
 ```bash
-hermes tailgate setup --every 5m --deliver telegram     # any Hermes delivery target; default: origin
+hermes tailgate setup --deliver telegram    # schedule defaults to "*/5 * * * *"
 ```
 
+Without `--deliver`, the target is `origin`. Run from a terminal there is no originating chat, so
+Hermes falls back to the home channel of the first platform that has one (set it with `/sethome`
+in that chat). With no home channel anywhere, nothing is delivered and the cron job records a
+delivery failure.
+
 `setup` writes `~/.hermes/scripts/tailgate-tick.py` and creates (or updates) a no-agent cron job
-named `tailgate`. Run it again after changing the interval or target.
+named `tailgate`. Run it again after changing the schedule or target. Conversations started
+before the install don't see tailgate; start a new one.
+
+`--schedule` takes a cron expression, default `*/5 * * * *`, so updates land on fixed clock
+times (Hermes validates the expression). Hermes's scheduler checks once a minute, so a round can
+start up to a minute after its time.
 
 Hermes wraps every cron delivery in a `Cronjob Response: tailgate` header and a footer suggesting
 "stop reminder tailgate", which would cost a model turn and delete the whole schedule. tailgate
@@ -65,11 +76,16 @@ hermes config set cron.wrap_response false     # applies to all cron jobs; Herme
 | `hermes tailgate status` | Sources and jobs |
 | `hermes tailgate tick [--dry-run]` | Run one progress round now and print it |
 | `hermes tailgate mute <id>` / `follow <id>` | Same as in chat |
-| `hermes tailgate setup [--every 5m] [--deliver target]` | Install or update the cron job |
+| `hermes tailgate setup [--schedule "*/5 * * * *"] [--deliver target]` | Install or update the cron job |
 
-The agent gets one tool, `tailgate_job_id(topic)`, which returns a fresh id such as `intraday-2`.
-Tell it in your skill or `SOUL.md` to call it before handing a job off and to use the id as the
-job's name.
+The agent gets one tool, `tailgate_job_id(topic)`, which returns a fresh id such as `intraday-2`,
+and one sentence in its system prompt asking it to use it (see below).
+
+## The agent and `tailgate_job_id`
+
+The tool is optional: tailgate reports every job its sources list, whatever the agent does. The
+tool only gives jobs tidy, never-reused names, and tailgate adds one sentence to each new
+conversation's system prompt asking the agent to use it.
 
 ## Job sources
 
@@ -103,9 +119,9 @@ plugins:
 or with `hermes config set plugins.entries.tailgate.settings.sources '[{"name": "openhands", "command": ["ssh", "sandbox", "openhands-remote", "watch", "--json"]}]'`.
 Restart the gateway after changing sources.
 
-Jobs that were already finished the first time tailgate sees them are not announced (they ended
-before tailgate knew about them), unless their id came from `tailgate_job_id`. State for jobs no
-source has reported for two weeks is dropped.
+`hermes tailgate setup` records the jobs that already exist as history; they are never announced.
+Every job that appears after that gets its finish line, even one that starts and ends between two
+rounds. State for jobs no source has reported for two weeks is dropped.
 
 ## Security
 

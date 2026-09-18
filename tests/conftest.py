@@ -45,7 +45,7 @@ class FakeCtx:
     def __init__(self, data_dir, sources):
         self.state = FakeState(data_dir)
         self._config = {"sources": sources}
-        self.commands, self.tools, self.cli = {}, {}, {}
+        self.commands, self.tools, self.cli, self.prompt_sections = {}, {}, {}, {}
 
     def get_config(self, key, default=None):
         return self._config.get(key, default)
@@ -55,6 +55,10 @@ class FakeCtx:
 
     def register_tool(self, name, toolset, schema, handler, **kwargs):
         self.tools[name] = (schema, handler)
+
+    def register_system_prompt_section(self, id, content, *, position="after_memory", max_chars=4000):
+        assert len(content) <= max_chars
+        self.prompt_sections[id] = content
 
     def register_cli_command(self, name, help, setup_fn, handler_fn=None, description=""):
         self.cli[name] = (setup_fn, handler_fn)

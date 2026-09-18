@@ -26,10 +26,21 @@ from . import tailgate_core as core
 PLUGIN_DIR = Path(__file__).resolve().parent
 CRON_NAME = "tailgate"
 TICK_SCRIPT = "tailgate-tick.py"
+# Cron expressions only, so rounds land on fixed clock times. Hermes also takes intervals
+# (`every 5m`), but runs them five minutes after the previous run started, checked once a
+# minute, so they drift; tailgate does not offer them.
+DEFAULT_SCHEDULE = "*/5 * * * *"
 USAGE = (
     "/tailgate (or /tg): list jobs\n"
     "/tailgate mute <job-id>: stop progress updates for one job\n"
     "/tailgate follow <job-id>: resume them"
+)
+
+PROMPT_SECTION = (
+    "When you hand a long-running job to another tool (a coding agent, CI, a long script), first "
+    "call the `tailgate_job_id` tool (find it with tool_search if it is not in your tool list) and "
+    "use the id it returns as the job's name. tailgate reports the job's progress to the user; "
+    "do not poll it yourself."
 )
 
 TOOL_SCHEMA = {
@@ -97,6 +108,10 @@ def register(ctx):
             return await mute_cmd(rest, sub == "mute")
         return USAGE
 
+    # Tool Search (on by default in Hermes) hides plugin tools behind a search step, and some
+    # models never search. One sentence in every new session's prompt names the tool.
+    ctx.register_system_prompt_section("tailgate.job-ids", PROMPT_SECTION, max_chars=600)
+
     for name in ("tailgate", "tg"):
         # A name taken by a built-in or another plugin is skipped by Hermes; /tailgate is the
         # canonical one, /tg only a shortcut.
@@ -116,7 +131,8 @@ def register(ctx):
     def cli_setup(parser):
         sub = parser.add_subparsers(dest="tailgate_command")
         setup = sub.add_parser("setup", help="Install or update the progress cron job")
-        setup.add_argument("--every", default="5m", help="How often, e.g. 5m or 10m (default 5m)")
+        setup.add_argument("--schedule", default=DEFAULT_SCHEDULE,
+                           help=f"Cron expression (default {DEFAULT_SCHEDULE!r}, e.g. '*/10 * * * *')")
         setup.add_argument("--deliver", default="origin",
                            help="Hermes delivery target, e.g. telegram, all (default origin)")
         tick = sub.add_parser("tick", help="Run one progress round now and print it")
@@ -128,7 +144,7 @@ def register(ctx):
     def cli_handler(args) -> int:
         command = getattr(args, "tailgate_command", None)
         if command == "setup":
-            return _setup(data_dir, sources, args.every, args.deliver)
+            return _setup(data_dir, sources, args.schedule, args.deliver)
         if command == "tick":
             print(core.tick(store, sources, commit=not args.dry_run) or "(nothing to report)")
             return 0
@@ -172,13 +188,18 @@ def _hermes_cmd() -> list[str]:
     return [exe] if exe else [sys.executable, "-m", "hermes_cli.main"]
 
 
-def _setup(data_dir: Path, sources: list[dict], every: str, deliver: str) -> int:
+def _setup(data_dir: Path, sources: list[dict], schedule: str, deliver: str) -> int:
+    if len(schedule.split()) != 5:
+        print(f"tailgate: --schedule must be a cron expression with five fields, e.g. "
+              f"{DEFAULT_SCHEDULE!r}; got {schedule!r}")
+        return 2
     hermes_home = data_dir.parent.parent  # <hermes home>/plugin-data/<plugin>
     scripts = hermes_home / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
     (scripts / TICK_SCRIPT).write_text(_tick_script(data_dir), encoding="utf-8")
     core.save_settings(data_dir, sources)
-    schedule = every if every.startswith("every ") else f"every {every}"
+    known = core.take_baseline(core.Store(data_dir), sources)
+    print(f"tailgate: {known} existing job(s) recorded as history; only jobs from now on are announced.")
     # Update the job if it exists (cron verbs accept a job name), otherwise create it.
     result = subprocess.run(_hermes_cmd() + ["cron", "edit", CRON_NAME, "--schedule", schedule,
                                              "--deliver", deliver], capture_output=True, text=True)
@@ -189,7 +210,7 @@ def _setup(data_dir: Path, sources: list[dict], every: str, deliver: str) -> int
     print(result.stdout.strip() or result.stderr.strip())
     if result.returncode != 0:
         return result.returncode
-    print(f"tailgate: {len(sources)} source(s), progress {schedule}, delivered to {deliver}.")
+    print(f"tailgate: {len(sources)} source(s), schedule {schedule!r}, delivered to {deliver}.")
     if not sources:
         print("tailgate: no sources configured yet; see README (plugins.entries.tailgate.settings.sources).")
     return 0
