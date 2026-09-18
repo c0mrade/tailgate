@@ -1,33 +1,51 @@
 # tailgate
 
-Follow the jobs your [Hermes Agent](https://github.com/NousResearch/hermes-agent) hands off to
-other tools (coding agents, CI, long scripts) from whatever chat you use, **without spending model
-turns on it**.
+### Progress updates in your chat for the long jobs your [Hermes Agent](https://github.com/NousResearch/hermes-agent) hands off to coding agents, CI and scripts, without spending a single model turn.
 
-```
-⏳ id: intraday-1 · running 1h 05m · 83 events · last: bundle exec rspec
-⏳ id: nightly-build-3 · running 12m · step 4/9
-✅ id: rubocop-fix-2 · done after 1h 11m · 108 events · ask Hermes about rubocop-fix-2
-```
+<img src="docs/screenshots/progress.jpg" alt="A tailgate progress update in Telegram for job #12, running for 3 minutes, with the mute hint underneath" width="400">
 
-- A progress line for every job you follow, every few minutes, and one line when it finishes.
-- `/tailgate mute <id>` silences one job; you still hear when it finishes. `/tailgate follow <id>`
-  brings it back. New jobs are followed by default.
-- Every job gets its finish line, even a short one that starts and ends between two rounds.
-- Tidy, never-reused job ids: the agent can ask tailgate for one before it hands a job off.
-- None of this calls the model. Progress runs as a Hermes no-agent cron job, and the slash commands
-  answer directly. On a local model that matters: an agent that wakes up every five minutes to
-  check on a job slows down the very job it is watching.
+*Hermes has handed a coding task to OpenHands as job #12, and every 5 minutes tailgate posts where
+it stands (shown in Telegram).*
 
-## Why
+## The problem
 
-A local agent that delegates coding work to another agent (OpenHands, Codex, Claude Code) will
-happily leave you wondering for hours whether anything is happening. Hermes can notify you about
-processes it started itself, but only with one global setting, and not about jobs running
-somewhere else. tailgate watches those jobs, lets you pick which ones you care about, and keeps
-the model out of it.
+You ask your agent for something big, it hands the work to a coding agent on another machine, and
+then there is silence for an hour. Was it started? Is it stuck? Did it finish while you weren't
+looking? Hermes can report on processes it started itself, with one global switch, but not on
+jobs running somewhere else, and asking the agent to keep checking is worse: on a local model,
+every check is a model turn taken away from the job it is checking on.
 
-## Install
+tailgate borrows an idea from Claude Code: while it works, its status line always tells you what
+it is doing and for how long (`✳ Discombobulating… (11s · ↓ 624 tokens)`). tailgate gives the jobs
+Hermes hands off the same kind of line (`running 14m · 38 events · last: bundle exec rspec`),
+delivered to your chat every 5 minutes, plus one line when the job is done.
+
+## What tailgate does
+
+- **Progress every 5 minutes** (by default, [configurable](#quick-start)) for each running job: how long it has run, how far it got, its
+  last step. One line when it finishes, and never more than one.
+- **Short numbers** for every job (`#12`), so muting one from your phone is `/tg mute 12`.
+- **Per-job control**: new jobs are followed, and you mute the ones you don't care about. Muted jobs still
+  tell you when they finish.
+- **Any chat Hermes supports**: Telegram, Discord, Slack, Signal and the rest. Updates are plain
+  text, so they look the same everywhere.
+- **No model calls, so no GPU time.** Updates are a script-only Hermes cron job, and the `/tg`
+  commands answer directly. Following a job never takes a turn on your model, so on a local setup
+  it can't slow down the job it reports on.
+- **Works with anything that can list its jobs**: a coding agent's job runner, CI, a batch script.
+  You give tailgate a command that prints the jobs as JSON (see [Job sources](#job-sources)).
+
+## Contents
+
+- [Quick start](#quick-start)
+- [Use](#use)
+- [The agent and `tailgate_job_id`](#the-agent-and-tailgate_job_id)
+- [Job sources](#job-sources)
+- [Security](#security)
+- [Known issues](#known-issues)
+- [Development](#development)
+
+## Quick start
 
 ```bash
 hermes plugins install https://github.com/c0mrade/tailgate    # or copy this directory to ~/.hermes/plugins/tailgate
@@ -49,43 +67,61 @@ delivery failure.
 
 `setup` writes `~/.hermes/scripts/tailgate-tick.py` and creates (or updates) a no-agent cron job
 named `tailgate`. Run it again after changing the schedule or target. Conversations started
-before the install don't see tailgate; start a new one.
+before the install don't see tailgate, please start a new one.
 
 `--schedule` takes a cron expression, default `*/5 * * * *`, so updates land on fixed clock
 times (Hermes validates the expression). Hermes's scheduler checks once a minute, so a round can
 start up to a minute after its time.
 
-Hermes wraps every cron delivery in a `Cronjob Response: tailgate` header and a footer suggesting
-"stop reminder tailgate", which would cost a model turn and delete the whole schedule. tailgate
-adds its own `/tg mute <id>` hint instead, so you probably want the wrapper off:
+```bash
+hermes tailgate setup --schedule "*/10 * * * *" --deliver telegram   # every 10 minutes
+hermes tailgate setup --schedule "*/15 9-17 * * 1-5"                 # every 15 minutes, 9:00-17:59, weekdays
+```
+
+Turn off Hermes's default header and footer on cron deliveries, so updates look like the screenshot
+above: tailgate's lines and its `/tg mute <number>` hint, nothing else.
 
 ```bash
-hermes config set cron.wrap_response false     # applies to all cron jobs; Hermes has no per-job switch
+hermes config set cron.wrap_response false     # applies to all cron jobs, Hermes has no per-job switch
 ```
 
 ## Use
 
+<img src="docs/screenshots/tg-list.jpg" alt="/tg in Telegram: one running job being followed, the rest finished or incomplete, each with its number" width="300">
+
+*`/tg` in a Telegram chat with Hermes: job #12 is running and followed, the others are finished.*
+
 | In chat | |
 |---|---|
-| `/tailgate` or `/tg` | List jobs, running first, with 🔔 following or 🔕 muted |
-| `/tailgate mute <id>` | No more progress lines for that job; the finish line still comes |
-| `/tailgate follow <id>` | Progress lines again |
+| `/tg` (or `/tailgate`) | List jobs, running first, with 🔔 following or 🔕 muted |
+| `/tg mute <number>` | No more progress lines for that job, but the finish line still comes. Without a number: the only running job |
+| `/tg follow <number>` | Progress lines again |
+
+<img src="docs/screenshots/mute.jpg" alt="/tg mute 12: job #12 muted, the finish line still comes" width="400">
+<img src="docs/screenshots/follow.jpg" alt="/tg follow 12: following job #12 again" width="400">
+
+*Muting and following job #12 from Telegram. These commands answer instantly: they don't go
+through the model.*
+
+A job's number (`#12` above) is handed out the first time tailgate sees it and never reused. Names
+work too, e.g. `/tg mute revise-minute-bars-1`.
 
 | In a terminal | |
 |---|---|
 | `hermes tailgate status` | Sources and jobs |
 | `hermes tailgate tick [--dry-run]` | Run one progress round now and print it |
-| `hermes tailgate mute <id>` / `follow <id>` | Same as in chat |
+| `hermes tailgate mute <number>` / `follow <number>` | Same as in chat |
 | `hermes tailgate setup [--schedule "*/5 * * * *"] [--deliver target]` | Install or update the cron job |
-
-The agent gets one tool, `tailgate_job_id(topic)`, which returns a fresh id such as `intraday-2`,
-and one sentence in its system prompt asking it to use it (see below).
 
 ## The agent and `tailgate_job_id`
 
+The agent gets one tool, `tailgate_job_id(topic)`, which turns a topic into a short, never-reused
+job name (at most three words), e.g. "Revise minute-bars storage design per PR #2 review" became
+`revise-minute-bars-1`. tailgate adds one sentence to each new conversation's system prompt asking
+the agent to use it.
+
 The tool is optional: tailgate reports every job its sources list, whatever the agent does. The
-tool only gives jobs tidy, never-reused names, and tailgate adds one sentence to each new
-conversation's system prompt asking the agent to use it.
+tool only keeps names short and tidy.
 
 ## Job sources
 
@@ -93,16 +129,19 @@ A source is a command tailgate runs (no shell) that prints one JSON object per j
 and exits 0:
 
 ```json
-{"id": "intraday-1", "state": "running", "elapsed_s": 3900, "progress": "83 events", "last": "bundle exec rspec"}
+{"id": "revise-minute-bars-1", "state": "running", "elapsed_s": 840, "progress": "38 events", "last": "bundle exec rspec"}
 ```
 
 | Field | Required | |
 |---|---|---|
-| `id` | yes | `[a-z0-9][a-z0-9._-]{0,62}` |
+| `id` | yes | `[a-z0-9][a-z0-9._-]{0,62}`, shown to the user as the job's name |
 | `state` | yes | `queued`, `running`, `done`, `incomplete` or `failed` |
 | `elapsed_s` | no | Seconds since the job started (or how long it ran) |
-| `progress` | no | Short free text, e.g. `83 events` or `step 4/9` |
+| `progress` | no | Short free text, e.g. `38 events` or `step 4/9` |
 | `last` | no | Short free text, e.g. the last command |
+
+The job's number (`#12`) is not part of a source's output. tailgate assigns it the first time it
+sees a job and keeps it in its own state, so sources only have to name their jobs.
 
 Configure sources in `~/.hermes/config.yaml`:
 
@@ -119,7 +158,7 @@ plugins:
 or with `hermes config set plugins.entries.tailgate.settings.sources '[{"name": "openhands", "command": ["ssh", "sandbox", "openhands-remote", "watch", "--json"]}]'`.
 Restart the gateway after changing sources.
 
-`hermes tailgate setup` records the jobs that already exist as history; they are never announced.
+`hermes tailgate setup` records the jobs that already exist as history, and they are never announced.
 Every job that appears after that gets its finish line, even one that starts and ends between two
 rounds. State for jobs no source has reported for two weeks is dropped.
 
@@ -134,7 +173,7 @@ Sources are argv lists run without a shell.
 
 - [hermes-agent#114209](https://github.com/NousResearch/hermes-agent/issues/114209): no-agent cron
   scripts can lose their environment. The generated tick script restores `HOME` so SSH sources keep
-  working; if a source needs other variables, set them in its command (e.g. `env VAR=… cmd`).
+  working. If a source needs other variables, set them in its command (e.g. `env VAR=… cmd`).
 - Mute and follow apply to the whole Hermes instance, not per user: plugin commands do not receive
   the sender yet ([hermes-agent#91526](https://github.com/NousResearch/hermes-agent/issues/91526)).
 
