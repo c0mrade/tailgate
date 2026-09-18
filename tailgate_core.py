@@ -21,6 +21,11 @@ from typing import Any, Iterable, Iterator
 
 JOB_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 TOPIC_CHARS = re.compile(r"[^a-z0-9]+")
+NUMBER = re.compile(r"^#?(\d{1,6})$")
+# Filler dropped from tool topics so ids stay short enough to read (and type) on a phone.
+STOPWORDS = frozenset("a an and as at by doc docs for from in into of on or pr the to with add adds "
+                      "create creates make new".split())
+STEM_WORDS, STEM_CHARS = 3, 24
 STATES = ("queued", "running", "done", "incomplete", "failed")
 ACTIVE = frozenset({"queued", "running"})
 FINISHED = frozenset({"done", "incomplete", "failed"})
@@ -31,7 +36,7 @@ FORGET_AFTER_S = 14 * 24 * 3600  # drop state for jobs no source has reported fo
 CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 # Appended to rounds that contain progress lines, the only time muting is relevant.
-HINT = "\n/tg mute <id> to silence one · /tg for all jobs"
+HINT = "\n/tg mute <number> to silence one · /tg for all jobs"
 
 STATE_FILE = "jobs.json"
 SETTINGS_FILE = "settings.json"
@@ -210,6 +215,14 @@ def duration(seconds: int | None) -> str:
     return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
 
 
+def number(state: dict, job_id: str) -> int:
+    """The job's short number (#11): handed out once, never reused, typed instead of the id."""
+    entry = state["jobs"].setdefault(job_id, {"muted": False, "reserved": False, "announced": False})
+    if "n" not in entry:
+        entry["n"] = state["next_n"] = state.get("next_n", 0) + 1
+    return entry["n"]
+
+
 def merge(state: dict, jobs: list[Job], now: float) -> None:
     """Record what the sources reported. The first round ever is the baseline: jobs already
     finished then ended before tailgate existed and are not announced. After that, every job
@@ -223,6 +236,7 @@ def merge(state: dict, jobs: list[Job], now: float) -> None:
             entry = known[job.id] = {"muted": False, "reserved": False, "first_seen": now,
                                      "announced": baseline and job.state in FINISHED}
         entry.update(source=job.source, state=job.state, last_seen=now)
+        number(state, job.id)
     state["baselined"] = True
     for job_id in [k for k, v in known.items()
                    if now - v.get("last_seen", v.get("first_seen", now)) > FORGET_AFTER_S]:
@@ -231,7 +245,9 @@ def merge(state: dict, jobs: list[Job], now: float) -> None:
 
 def reserve_id(state: dict, topic: str, taken: Iterable[str], now: float) -> str:
     """Unique `<topic>-<n>`, above every number any source reports or tailgate has handed out."""
-    stem = TOPIC_CHARS.sub("-", topic.lower()).strip("-")[:40].strip("-") or "job"
+    words = [w for w in TOPIC_CHARS.split(re.sub(r"\(.*?\)", " ", topic.lower()))
+             if w and w not in STOPWORDS][:STEM_WORDS]
+    stem = "-".join(words)[:STEM_CHARS].strip("-") or "job"
     # Numbers only go up, so an id is never handed out twice, even after its job is forgotten.
     numbered = re.compile(rf"^{re.escape(stem)}-(\d+)$")
     used = [int(m.group(1)) for k in [*state["jobs"], *taken] if (m := numbered.match(k))]
@@ -242,11 +258,16 @@ def reserve_id(state: dict, topic: str, taken: Iterable[str], now: float) -> str
     job_id = f"{stem}-{n}"
     state["jobs"][job_id] = {"muted": False, "reserved": True, "announced": False,
                              "first_seen": now, "last_seen": now}
+    number(state, job_id)
     return job_id
 
 
-def progress_line(job: Job) -> str:
-    parts = [f"{ICONS[job.state]} id: {job.id}", f"{job.state} {duration(job.elapsed_s)}".strip()]
+def label(job: Job, n: int | None) -> str:
+    return f"{ICONS[job.state]} #{n} name: {job.id}" if n else f"{ICONS[job.state]} name: {job.id}"
+
+
+def progress_line(job: Job, n: int | None = None) -> str:
+    parts = [label(job, n), f"{job.state} {duration(job.elapsed_s)}".strip()]
     if job.state != "queued":  # nothing has happened yet: no "0 events", no last step
         if job.progress:
             parts.append(job.progress)
@@ -255,11 +276,11 @@ def progress_line(job: Job) -> str:
     return " · ".join(parts)
 
 
-def finish_line(job: Job) -> str:
+def finish_line(job: Job, n: int | None = None) -> str:
     took = f" after {duration(job.elapsed_s)}" if job.elapsed_s is not None else ""
     what = {"done": f"done{took}", "incomplete": f"stopped without finishing{took}",
             "failed": f"failed{took}"}[job.state]
-    parts = [f"{ICONS[job.state]} id: {job.id}", what]
+    parts = [label(job, n), what]
     if job.progress:
         parts.append(job.progress)
     if job.state == "done":
@@ -277,9 +298,9 @@ def advance(state: dict, jobs: list[Job], now: float) -> list[str]:
         if job.state in FINISHED:
             if not entry.get("announced"):
                 entry["announced"] = True
-                lines.append(finish_line(job))
+                lines.append(finish_line(job, entry.get("n")))
         elif not entry.get("muted"):
-            lines.append(progress_line(job))
+            lines.append(progress_line(job, entry.get("n")))
     return lines
 
 
@@ -313,7 +334,8 @@ def list_jobs(state: dict, jobs: list[Job]) -> str:
         return "No jobs."
     lines = []
     for job in sorted(jobs, key=lambda j: (j.state not in ACTIVE, j.id)):
-        line = f"{ICONS[job.state]} id: {job.id} · {job.state} {duration(job.elapsed_s)}".rstrip()
+        n = state["jobs"].get(job.id, {}).get("n")
+        line = f"{label(job, n)} · {job.state} {duration(job.elapsed_s)}".rstrip()
         if job.state in ACTIVE:
             muted = state["jobs"].get(job.id, {}).get("muted")
             line += " · 🔕 muted" if muted else " · 🔔 following"
@@ -321,21 +343,32 @@ def list_jobs(state: dict, jobs: list[Job]) -> str:
     return "\n".join(lines)
 
 
-def set_muted(state: dict, jobs: list[Job], job_id: str, muted: bool) -> str:
+def set_muted(state: dict, jobs: list[Job], target: str, muted: bool) -> str:
+    """target: a job's number (11 or #11), its id, or nothing when exactly one job is running."""
     verb = "mute" if muted else "follow"
-    current = {job.id: job for job in jobs}
-    if not job_id:
-        active = [j.id for j in jobs if j.state in ACTIVE]
-        return f"Usage: /tailgate {verb} <job-id>. Running: {', '.join(active) or 'none'}"
-    if not JOB_ID.match(job_id):
-        return f"'{job_id[:64]}' is not a valid job id."
-    if job_id not in current:
-        return f"No job called {job_id}. See /tailgate."
-    if current[job_id].state in FINISHED:
-        return f"{job_id} has already finished ({current[job_id].state}); nothing to {verb}."
-    entry = state["jobs"].setdefault(job_id, {"reserved": False, "announced": False})
-    entry["muted"] = muted
+    active = [j for j in jobs if j.state in ACTIVE]
+    target = target.strip()
+    if not target:
+        if len(active) != 1:
+            running = ", ".join(f"#{number(state, j.id)} {j.id}" for j in active) or "none"
+            return f"Usage: /tg {verb} <number>. Running: {running}"
+        job = active[0]
+    elif m := NUMBER.match(target):
+        by_number = {state["jobs"].get(j.id, {}).get("n"): j for j in jobs}
+        job = by_number.get(int(m.group(1)))
+        if job is None:
+            return f"No job #{m.group(1)}. See /tg."
+    elif JOB_ID.match(target):
+        job = next((j for j in jobs if j.id == target), None)
+        if job is None:
+            return f"No job called {target}. See /tg."
+    else:
+        return f"'{target[:64]}' is not a job number or name."
+    n = number(state, job.id)
+    if job.state in FINISHED:
+        return f"#{n} {job.id} has already finished ({job.state}); nothing to {verb}."
+    state["jobs"][job.id]["muted"] = muted
     if muted:
-        return (f"🔕 {job_id} muted: no more progress updates. You will still hear when it "
-                f"finishes. /tailgate follow {job_id} to undo.")
-    return f"🔔 Following {job_id}."
+        return (f"🔕 #{n} {job.id} muted: no more progress updates. You will still hear when it "
+                f"finishes. /tg follow {n} to undo.")
+    return f"🔔 Following #{n} {job.id}."

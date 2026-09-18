@@ -32,8 +32,8 @@ TICK_SCRIPT = "tailgate-tick.py"
 DEFAULT_SCHEDULE = "*/5 * * * *"
 USAGE = (
     "/tailgate (or /tg): list jobs\n"
-    "/tailgate mute <job-id>: stop progress updates for one job\n"
-    "/tailgate follow <job-id>: resume them"
+    "/tailgate mute <number>: stop progress updates for one job (no number: the only running job)\n"
+    "/tailgate follow <number>: resume them"
 )
 
 PROMPT_SECTION = (
@@ -56,7 +56,8 @@ TOOL_SCHEMA = {
         "properties": {
             "topic": {
                 "type": "string",
-                "description": "One or two words naming the job, e.g. 'intraday' or 'rubocop fix'.",
+                "description": "One to three words naming the job, e.g. 'intraday storage' or "
+                               "'rubocop fix'. Not a sentence: it becomes the id the user types.",
             }
         },
         "required": ["topic"],
@@ -83,9 +84,15 @@ def register(ctx):
     async def collect():
         return await asyncio.to_thread(core.collect, sources)
 
+    def record(jobs):
+        """Record what the sources report now, so every listed job already has its number."""
+        with store.edit() as state:
+            core.merge(state, jobs, time.time())
+            return state
+
     async def list_cmd() -> str:
         jobs, problems = await collect()
-        state = await asyncio.to_thread(store.read)
+        state = await asyncio.to_thread(record, jobs)
         text = core.list_jobs(state, jobs) if sources else "No job sources configured. See the tailgate README."
         return "\n".join([text] + [f"⚠️ {p}" for p in problems])
 
@@ -94,6 +101,7 @@ def register(ctx):
 
         def apply() -> str:
             with store.edit() as state:
+                core.merge(state, jobs, time.time())
                 return core.set_muted(state, jobs, job_id, muted)
 
         reply = await asyncio.to_thread(apply)
@@ -115,8 +123,8 @@ def register(ctx):
     for name in ("tailgate", "tg"):
         # A name taken by a built-in or another plugin is skipped by Hermes; /tailgate is the
         # canonical one, /tg only a shortcut.
-        ctx.register_command(name, tailgate, description="Jobs: list, mute <id>, follow <id>",
-                             args_hint="[mute|follow <job-id>]")
+        ctx.register_command(name, tailgate, description="Jobs: list, mute <number>, follow <number>",
+                             args_hint="[mute|follow <number>]")
 
     def job_id_tool(params, **kwargs) -> str:
         topic = str((params or {}).get("topic") or "job")
@@ -139,7 +147,8 @@ def register(ctx):
         tick.add_argument("--dry-run", action="store_true", help="Preview without recording")
         sub.add_parser("status", help="List jobs and configured sources")
         for verb, text in (("mute", "Stop progress updates for one job"), ("follow", "Resume them")):
-            sub.add_parser(verb, help=text).add_argument("job_id")
+            sub.add_parser(verb, help=text).add_argument("job", nargs="?", default="",
+                                                       help="Job number (#11) or name")
 
     def cli_handler(args) -> int:
         command = getattr(args, "tailgate_command", None)
@@ -151,14 +160,17 @@ def register(ctx):
         if command == "status":
             jobs, problems = core.collect(sources)
             print("Sources: " + (", ".join(s["name"] for s in sources) or "none configured"))
-            print(core.list_jobs(store.read(), jobs))
+            with store.edit() as state:
+                core.merge(state, jobs, time.time())
+                print(core.list_jobs(state, jobs))
             for p in problems:
                 print(f"warning: {p}")
             return 0
         if command in ("mute", "follow"):
             jobs, problems = core.collect(sources)
             with store.edit() as state:
-                print(core.set_muted(state, jobs, args.job_id, command == "mute"))
+                core.merge(state, jobs, time.time())
+                print(core.set_muted(state, jobs, args.job, command == "mute"))
             for p in problems:
                 print(f"warning: {p}")
             return 0

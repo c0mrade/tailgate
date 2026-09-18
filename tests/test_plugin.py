@@ -24,10 +24,10 @@ def test_slash_commands(plugin, make_ctx, source):
     ctx = make_ctx([source(RUNNING)])
     plugin.register(ctx)
     run = lambda args: asyncio.run(ctx.commands["tailgate"](args))
-    assert run("") == "⏳ id: intraday-1 · running 10m · 🔔 following"
-    assert run("mute intraday-1").startswith("🔕 intraday-1 muted")
-    assert run("list") == "⏳ id: intraday-1 · running 10m · 🔕 muted"
-    assert run("follow intraday-1") == "🔔 Following intraday-1."
+    assert run("") == "⏳ #1 name: intraday-1 · running 10m · 🔔 following"
+    assert run("mute 1").startswith("🔕 #1 intraday-1 muted")
+    assert run("list") == "⏳ #1 name: intraday-1 · running 10m · 🔕 muted"
+    assert run("follow intraday-1") == "🔔 Following #1 intraday-1."
     assert run("help") == plugin.USAGE
     assert asyncio.run(ctx.commands["tg"]("")) == run("")
 
@@ -61,7 +61,7 @@ def test_generated_tick_script_runs_standalone(plugin, make_ctx, source, tmp_pat
     result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True,
                             env={"PATH": "/usr/bin:/bin"})  # stripped env, as in hermes-agent#114209
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "⏳ id: intraday-1 · running 10m\n" + core.HINT
+    assert result.stdout.strip() == "⏳ #1 name: intraday-1 · running 10m\n" + core.HINT
 
 
 def _cli(ctx, *argv):
@@ -83,7 +83,7 @@ def test_cli_mute_follow_status(plugin, make_ctx, source, capsys):
     assert capsys.readouterr().out.strip() == "(nothing to report)"
     assert _cli(ctx, "follow", "intraday-1") == 0
     assert _cli(ctx, "tick", "--dry-run") == 0
-    assert "⏳ id: intraday-1" in capsys.readouterr().out
+    assert "⏳ #1 name: intraday-1" in capsys.readouterr().out
 
 
 def test_setup_passes_the_schedule_through(plugin, make_ctx, source, monkeypatch, tmp_path):
