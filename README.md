@@ -72,9 +72,13 @@ your chat.
 Requires Python 3.11 or newer, the same as Hermes. tailgate uses only the standard library.
 
 ```bash
-hermes plugins install https://github.com/c0mrade/tailgate    # or copy this directory to ~/.hermes/plugins/tailgate
+hermes plugins install tailgate
 hermes plugins enable --no-allow-tool-override tailgate
 ```
+
+tailgate is in the [official Hermes plugin catalog](https://github.com/NousResearch/hermes-agent/tree/main/plugin-catalog),
+so installing by name gets the reviewed, pinned release. To run the latest `main` instead, install
+from `https://github.com/c0mrade/tailgate` or copy this directory to `~/.hermes/plugins/tailgate`.
 
 Tell tailgate where your jobs are (see *Job sources*), restart Hermes (`hermes-gateway` and, if
 you use web chats, `hermes-dashboard`: each loads plugins once at start), then schedule the
