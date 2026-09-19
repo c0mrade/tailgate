@@ -4,6 +4,7 @@ description: Follow the jobs Hermes hands off (coding agents, CI, long scripts).
 author: Emir Ibrahimbegovic
 manifest_version: 2
 api_version: 1
+requires_hermes: ">=0.21"
 license: MIT
 homepage: https://github.com/c0mrade/tailgate
 tags: [jobs, notifications, delegation, gateway, telegram]

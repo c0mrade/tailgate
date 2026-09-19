@@ -5,15 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..tailgate_core import Source, Tracker
-from . import setup
+from . import schedule
 
 
 def register(ctx, tracker: Tracker, data_dir: Path, sources: list[Source]) -> None:
     def build(parser):
         sub = parser.add_subparsers(dest="tailgate_command")
         p = sub.add_parser("setup", help="Install or update the progress cron job")
-        p.add_argument("--schedule", default=setup.DEFAULT_SCHEDULE,
-                       help=f"Cron expression (default {setup.DEFAULT_SCHEDULE!r}, e.g. '*/10 * * * *')")
+        p.add_argument("--schedule", default=schedule.DEFAULT_SCHEDULE,
+                       help=f"Cron expression (default {schedule.DEFAULT_SCHEDULE!r}, e.g. '*/10 * * * *')")
         p.add_argument("--deliver", default="origin",
                        help="Hermes delivery target, e.g. telegram, all (default origin)")
         p = sub.add_parser("tick", help="Run one progress round now and print it")
@@ -26,7 +26,7 @@ def register(ctx, tracker: Tracker, data_dir: Path, sources: list[Source]) -> No
     def handle(args) -> int:
         command = getattr(args, "tailgate_command", None)
         if command == "setup":
-            return setup.run(data_dir, sources, args.schedule, args.deliver)
+            return schedule.install(data_dir, sources, args.schedule, args.deliver)
         if command == "tick":
             print(tracker.round(commit=not args.dry_run) or "(nothing to report)")
             return 0

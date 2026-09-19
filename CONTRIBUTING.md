@@ -18,7 +18,7 @@ tailgate/
 │   ├── commands.py          /tailgate and /tg
 │   ├── tool.py              the tailgate_job_id tool and its prompt sentence
 │   ├── cli.py               hermes tailgate setup|tick|status|mute|follow
-│   └── setup.py             the tick script and the cron job
+│   └── schedule.py          the tick script and the cron job (hermes tailgate setup)
 └── tests/                   one test file per module
 ```
 

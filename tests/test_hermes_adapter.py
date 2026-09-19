@@ -60,8 +60,8 @@ def test_cli_mute_follow_status_tick(plugin, make_ctx, source, capsys):
 
 def test_setup_passes_the_schedule_through_and_refuses_intervals(plugin, make_ctx, source, monkeypatch):
     calls = []
-    setup = sys.modules["tailgate_plugin.hermes_adapter.setup"]
-    monkeypatch.setattr(setup.subprocess, "run", lambda cmd, **kw: calls.append(cmd) or
+    schedule = sys.modules["tailgate_plugin.hermes_adapter.schedule"]
+    monkeypatch.setattr(schedule.subprocess, "run", lambda cmd, **kw: calls.append(cmd) or
                         subprocess.CompletedProcess(cmd, 0, "ok", ""))
     ctx = make_ctx([source(RUNNING)])
     plugin.register(ctx)
@@ -77,9 +77,9 @@ def test_setup_passes_the_schedule_through_and_refuses_intervals(plugin, make_ct
 def test_generated_tick_script_runs_standalone(plugin, make_ctx, source, tmp_path):
     ctx = make_ctx([source(RUNNING)])
     plugin.register(ctx)
-    setup = sys.modules["tailgate_plugin.hermes_adapter.setup"]
+    schedule = sys.modules["tailgate_plugin.hermes_adapter.schedule"]
     script = tmp_path / "tailgate-tick.py"
-    script.write_text(setup.tick_script(ctx.state.data_dir))
+    script.write_text(schedule.tick_script(ctx.state.data_dir))
     result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True,
                             env={"PATH": "/usr/bin:/bin"})  # stripped env, as in hermes-agent#114209
     assert result.returncode == 0, result.stderr

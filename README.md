@@ -64,6 +64,8 @@ your chat.
 
 ## Quick start
 
+Requires Python 3.11 or newer, the same as Hermes. tailgate uses only the standard library.
+
 ```bash
 hermes plugins install https://github.com/c0mrade/tailgate    # or copy this directory to ~/.hermes/plugins/tailgate
 hermes plugins enable --no-allow-tool-override tailgate

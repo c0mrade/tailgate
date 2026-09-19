@@ -1,4 +1,4 @@
-"""`hermes tailgate setup`: the tick script and the no-agent cron job that runs it."""
+"""The progress schedule: the tick script and the no-agent cron job that runs it (`hermes tailgate setup`)."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def hermes_cmd() -> list[str]:
     return [exe] if exe else [sys.executable, "-m", "hermes_cli.main"]
 
 
-def run(data_dir: Path, sources: list[Source], schedule: str, deliver: str) -> int:
+def install(data_dir: Path, sources: list[Source], schedule: str, deliver: str) -> int:
     if len(schedule.split()) != 5:
         print(f"tailgate: --schedule must be a cron expression with five fields, e.g. "
               f"{DEFAULT_SCHEDULE!r}; got {schedule!r}")
