@@ -73,6 +73,19 @@ way to share one. Open an issue if you think it belongs in the README as an exam
   their work to a thread (see `hermes_adapter/commands.py`).
 - Text from job sources is untrusted. It is shown to the user and never passed to the model.
 
+## Releasing (maintainers)
+
+On an up-to-date, clean `main`:
+
+```bash
+python3 scripts/release.py
+```
+
+It shows the current version, asks which one to release (patch, minor, major or a typed
+version), bumps `plugin.yaml`, commits, tags and, after asking, pushes. The tag starts
+`.github/workflows/release.yml`, which checks the tag matches `plugin.yaml`, runs the tests and
+publishes the GitHub Release with generated notes.
+
 ## Reporting a bug
 
 Include your Hermes version (`hermes --version`), the output of `hermes tailgate status`, and, if
