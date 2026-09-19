@@ -1,0 +1,36 @@
+# Push a tag like v0.2.0 and this publishes a GitHub Release for it, with notes generated from
+# the pull requests and commits since the previous tag. It refuses if the tag doesn't match the
+# version in plugin.yaml, or if the tests fail.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write  # needed to create the release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tag must match plugin.yaml
+        run: |
+          version=$(sed -n 's/^version: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' plugin.yaml)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match plugin.yaml version $version"
+            exit 1
+          fi
+      - name: Test
+        run: |
+          pip install pytest ruff
+          ruff check .
+          python -m pytest -q
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes --title "tailgate $GITHUB_REF_NAME"
