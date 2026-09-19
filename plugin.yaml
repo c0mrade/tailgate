@@ -1,5 +1,5 @@
 name: tailgate
-version: 0.1.0
+version: 0.2.0
 description: Follow the jobs Hermes hands off (coding agents, CI, long scripts). Progress updates and a finish notice in chat, per-job mute and follow, no model calls.
 author: Emir Ibrahimbegovic
 manifest_version: 2

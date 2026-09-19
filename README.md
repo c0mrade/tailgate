@@ -32,6 +32,14 @@ delivered to your chat every 5 minutes, plus one line when the job is done.
 - **No model calls, so no GPU time.** Updates are a script-only Hermes cron job, and the `/tg`
   commands answer directly. Following a job never takes a turn on your model, so on a local setup
   it can't slow down the job it reports on.
+- **Survives Hermes restarts.** Jobs run on their own machines and tailgate keeps its state on
+  disk, so when Hermes restarts (it posts its own notice, below) your jobs keep running and the
+  next round carries on where the last one left off, same numbers, same mutes.
+
+  <img src="docs/screenshots/hermes-restart.jpg" alt="Hermes's own restart notice in Telegram" width="400">
+
+  *Hermes's own notice when it restarts. It comes from Hermes, not tailgate, and a running job
+  isn't affected.*
 - **Works with anything that can list its jobs**: a coding agent's job runner, CI, a batch script.
   You give tailgate a command that prints the jobs as JSON (see [Job sources](#job-sources)).
 
@@ -171,20 +179,17 @@ Sources are argv lists run without a shell.
 
 ## Known issues
 
-- [hermes-agent#114209](https://github.com/NousResearch/hermes-agent/issues/114209): no-agent cron
-  scripts can lose their environment. The generated tick script restores `HOME` so SSH sources keep
-  working. If a source needs other variables, set them in its command (e.g. `env VAR=… cmd`).
+- No-agent cron scripts lost their environment in Hermes up to v0.21.3
+  ([hermes-agent#114209](https://github.com/NousResearch/hermes-agent/issues/114209), fixed by
+  [#114851](https://github.com/NousResearch/hermes-agent/pull/114851), merged 2026-09-18). The
+  generated tick script restores `HOME` itself, so SSH sources work on either side of the fix. If a
+  source needs other variables, set them in its command (e.g. `env VAR=… cmd`).
 - Mute and follow apply to the whole Hermes instance, not per user: plugin commands do not receive
   the sender yet ([hermes-agent#91526](https://github.com/NousResearch/hermes-agent/issues/91526)).
 
 ## Development
 
-```bash
-python3 -m venv .venv && .venv/bin/pip install pytest
-.venv/bin/python -m pytest
-hermes plugins validate .          # what the Hermes plugin catalog runs
-hermes plugins doctor . --ci
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how the code is laid out and how to run the tests.
 
 ## License
 

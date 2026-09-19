@@ -1,4 +1,4 @@
-"""Load tailgate the way Hermes does: as a package from the repo directory."""
+"""Shared fixtures: the plugin loaded as Hermes loads it, fake job sources and a fake Hermes context."""
 
 import importlib.util
 import json
@@ -8,10 +8,16 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO))  # for `import tailgate_core`, as the cron tick script does
+sys.path.insert(0, str(REPO))  # `import tailgate_core`, as the cron tick script does
+
+from tailgate_core import Source, Store, Tracker  # noqa: E402
+
+RUNNING = {"id": "intraday-1", "state": "running", "elapsed_s": 3900, "progress": "83 events",
+           "last": "bundle exec rspec"}
 
 
-def load_plugin():
+@pytest.fixture
+def plugin():
     spec = importlib.util.spec_from_file_location(
         "tailgate_plugin", REPO / "__init__.py", submodule_search_locations=[str(REPO)])
     module = importlib.util.module_from_spec(spec)
@@ -22,15 +28,23 @@ def load_plugin():
 
 @pytest.fixture
 def source(tmp_path):
-    """A job source whose output the test controls: write jobs, get a source dict."""
+    """A job source whose output the test controls: source(job, job, ...) -> Source."""
     out = tmp_path / "source-output.jsonl"
     script = tmp_path / "source.py"
     script.write_text(f"import sys; sys.stdout.write(open({str(out)!r}).read())\n")
 
     def make(*jobs, name="fake", raw=None):
         out.write_text(raw if raw is not None else "".join(json.dumps(j) + "\n" for j in jobs))
-        return {"name": name, "command": [sys.executable, str(script)]}
+        return Source(name, (sys.executable, str(script)))
 
+    return make
+
+
+@pytest.fixture
+def tracker(tmp_path):
+    """tracker(sources, now=...) -> Tracker on a fresh store with a fixed clock."""
+    def make(sources, now=1000.0):
+        return Tracker(Store(tmp_path / "data"), sources, clock=lambda: now)
     return make
 
 
@@ -65,12 +79,7 @@ class FakeCtx:
 
 
 @pytest.fixture
-def plugin():
-    return load_plugin()
-
-
-@pytest.fixture
 def make_ctx(tmp_path):
     def make(sources):
-        return FakeCtx(tmp_path / "plugin-data" / "tailgate", sources)
+        return FakeCtx(tmp_path / "plugin-data" / "tailgate", [s.to_config() for s in sources])
     return make
