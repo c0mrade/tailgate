@@ -7,18 +7,27 @@
 *Hermes has handed a coding task to OpenHands as job #12, and every 5 minutes tailgate posts where
 it stands (shown in Telegram).*
 
-## The problem
+## Why tailgate
 
-You ask your agent for something big, it hands the work to a coding agent on another machine, and
-then there is silence for an hour. Was it started? Is it stuck? Did it finish while you weren't
-looking? Hermes can report on processes it started itself, with one global switch, but not on
-jobs running somewhere else, and asking the agent to keep checking is worse: on a local model,
-every check is a model turn taken away from the job it is checking on.
+**The setup it's for.** A local multi-agent setup: Hermes as the front desk, other agents (a
+coding agent, a CI runner, a batch job) each in their own VM, all sharing one GPU or a small pool.
+A limited GPU is the norm for developers running models locally, so every model turn counts.
+
+**The gap.** Hermes starts those jobs but can't see inside them, because they run on other
+machines. There is no per-job notification today: nothing tells you a job started, how it's
+going, or that it finished, and nothing lets you silence one job and keep the others.
+
+**Why not just ask Hermes?** Every "how's it going?" is a model turn on the same GPU the job is
+using, so checking slows down the work you're checking on.
+
+**What tailgate adds.** A progress line per job every 5 minutes, one line when it finishes, and
+per-job mute, all without a single model call. It doesn't replace Hermes's own views of its
+subagents (`/agents` in the terminal UI). It covers the jobs those can't see.
 
 tailgate borrows an idea from Claude Code: while it works, its status line always tells you what
-it is doing and for how long (`✳ Discombobulating… (11s · ↓ 624 tokens)`). tailgate gives the jobs
-Hermes hands off the same kind of line (`running 14m · 38 events · last: bundle exec rspec`),
-delivered to your chat every 5 minutes, plus one line when the job is done.
+it is doing and for how long (`✳ Discombobulating… (11s · ↓ 624 tokens)`). tailgate gives each
+handed-off job the same kind of line (`running 14m · 38 events · last: bundle exec rspec`), in
+your chat.
 
 ## What tailgate does
 
