@@ -1,5 +1,10 @@
 # tailgate
 
+[![tests](https://img.shields.io/github/actions/workflow/status/c0mrade/tailgate/tests.yml?branch=main&label=tests)](https://github.com/c0mrade/tailgate/actions/workflows/tests.yml)
+[![version](https://img.shields.io/github/v/tag/c0mrade/tailgate?label=version&sort=semver)](https://github.com/c0mrade/tailgate/releases)
+[![python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](#quick-start)
+[![license](https://img.shields.io/github/license/c0mrade/tailgate)](LICENSE)
+
 ### Progress updates in your chat for the long jobs your [Hermes Agent](https://github.com/NousResearch/hermes-agent) hands off to coding agents, CI and scripts, without spending a single model turn.
 
 <img src="docs/screenshots/progress.jpg" alt="A tailgate progress update in Telegram for job #12, running for 3 minutes, with the mute hint underneath" width="400">
